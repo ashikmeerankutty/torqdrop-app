@@ -1,0 +1,6 @@
+Check any used car before you buy|A guided inspection, section by section
+Read the engine's fault codes|Plug in a Bluetooth OBD-II adapter
+Fault codes in plain English|What it means, how serious, what to check
+Live engine data|RPM, coolant, fuel trims and more
+AI reviews your photos|Spots dents, rust, leaks and wear
+A report you can share|Verdict, findings and evidence in one link

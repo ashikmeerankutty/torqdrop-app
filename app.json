@@ -1,0 +1,126 @@
+{
+  "expo": {
+    "name": "TorqDrop",
+    "slug": "torqdrop-connect",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "scheme": "torqdrop",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.torqdrop.connect",
+      "googleServicesFile": "./GoogleService-Info.plist",
+      "associatedDomains": [
+        "applinks:torqdrop-connect.firebaseapp.com"
+      ]
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#FF6A1A",
+        "foregroundImage": "./assets/images/android-icon-foreground.png",
+        "backgroundImage": "./assets/images/android-icon-background.png",
+        "monochromeImage": "./assets/images/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "package": "com.torqdrop.connect",
+      "googleServicesFile": "./google-services.json",
+      "permissions": [
+        "BLUETOOTH_SCAN",
+        "BLUETOOTH_CONNECT",
+        "CAMERA",
+        "android.permission.BLUETOOTH",
+        "android.permission.BLUETOOTH_ADMIN",
+        "android.permission.BLUETOOTH_CONNECT",
+        "android.permission.RECORD_AUDIO"
+      ],
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "data": [
+            {
+              "scheme": "https",
+              "host": "torqdrop-connect.firebaseapp.com",
+              "pathPrefix": "/__/auth/links"
+            }
+          ],
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
+        }
+      ]
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "single",
+      "favicon": "./assets/images/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/images/splash-icon.png",
+          "imageWidth": 260,
+          "resizeMode": "contain",
+          "backgroundColor": "#0B0D10"
+        }
+      ],
+      "react-native-ble-plx",
+      "@react-native-firebase/app",
+      "@react-native-firebase/auth",
+      [
+        "expo-build-properties",
+        {
+          "ios": {
+            "useFrameworks": "dynamic"
+          },
+          "android": {
+            "kotlinVersion": "2.3.20"
+          }
+        }
+      ],
+      "expo-secure-store",
+      [
+        "expo-image-picker",
+        {
+          "cameraPermission": "TorqDrop uses the camera to photograph the car during an inspection.",
+          "photosPermission": false,
+          "microphonePermission": "TorqDrop records the engine's sound for the engine sound check."
+        }
+      ],
+      "@react-native-firebase/app-check",
+      "expo-web-browser",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "TorqDrop uses the camera to photograph the car and its documents, and to film the engine for the engine sound check.",
+          "microphonePermission": "TorqDrop records the engine's sound for the engine sound check.",
+          "recordAudioAndroid": true,
+          "barcodeScannerEnabled": false
+        }
+      ],
+      "expo-iap",
+      "expo-sqlite",
+      "expo-sharing",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "TorqDrop uses your location while recording a trip to draw its route."
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "extra": {
+      "router": {
+        "asyncRoutes": {
+          "web": true
+        }
+      }
+    }
+  }
+}

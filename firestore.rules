@@ -1,0 +1,156 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isOrgMember(orgId) {
+      return orgId != null
+        && exists(/databases/$(database)/documents/orgs/$(orgId)/members/$(request.auth.uid));
+    }
+
+    // Readable by the owner, or by members of the document's org.
+    function canRead(data) {
+      return signedIn()
+        && (data.ownerUid == request.auth.uid || isOrgMember(data.get('orgId', null)));
+    }
+
+    // Written only by Cloud Functions: the AI summary and the sign-off.
+    function serverFieldsUnchanged() {
+      return !request.resource.data.diff(resource.data).affectedKeys()
+        .hasAny(['aiSummary', 'signOff', 'signedOffAt', 'reportId', 'verdict']);
+    }
+
+    // Fields the owner may never change on update.
+    function ownerUnchanged() {
+      return request.resource.data.ownerUid == resource.data.ownerUid
+        && request.resource.data.get('orgId', null) == resource.data.get('orgId', null);
+    }
+
+    // ---- identity ----
+    match /users/{uid} {
+      allow read, delete: if signedIn() && request.auth.uid == uid;
+      allow create, update: if signedIn() && request.auth.uid == uid && validProfile(request.resource.data);
+    }
+
+    // Name and email the user entered; nothing else is stored on the profile.
+    function validProfile(d) {
+      return d.keys().hasOnly(['fullName', 'email', 'updatedAt'])
+        && d.fullName is string && d.fullName.size() >= 2 && d.fullName.size() <= 80
+        && d.email is string && d.email.size() <= 254 && d.email.matches('^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$');
+    }
+
+    // Orgs and memberships are written by Cloud Functions only (Phase 2).
+    match /orgs/{orgId} {
+      allow read: if signedIn() && isOrgMember(orgId);
+      allow write: if false;
+      match /members/{uid} {
+        allow read: if signedIn() && isOrgMember(orgId);
+        allow write: if false;
+      }
+    }
+
+    // ---- billing: read-only for clients, written by Cloud Functions ----
+    match /plans/{planId} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+    match /subscriptions/{id} {
+      allow read: if canRead(resource.data);
+      allow write: if false;
+    }
+    match /creditLedger/{id} {
+      allow read: if canRead(resource.data);
+      allow write: if false;
+    }
+    match /payments/{id} {
+      allow read, write: if false;
+    }
+    // Report balance: the owner can see it, only verifyPurchase and finalizeReport change it.
+    match /credits/{uid} {
+      allow read: if signedIn() && request.auth.uid == uid;
+      allow write: if false;
+    }
+    match /reports/{id} {
+      allow read: if canRead(resource.data);
+      allow write: if false;
+    }
+    match /aiUsage/{id} {
+      allow read, write: if false;
+    }
+    // Daily AI allowance counters and report share links: functions only.
+    match /aiQuota/{uid} {
+      allow read, write: if false;
+    }
+    match /reportShares/{id} {
+      allow read, write: if false;
+    }
+
+    // ---- vehicles and adapters ----
+    match /vehicles/{id} {
+      allow read: if canRead(resource.data);
+      allow create: if signedIn() && request.resource.data.ownerUid == request.auth.uid;
+      allow update: if signedIn() && resource.data.ownerUid == request.auth.uid && ownerUnchanged();
+      allow delete: if signedIn() && resource.data.ownerUid == request.auth.uid;
+    }
+    match /adapterSessions/{id} {
+      allow read: if canRead(resource.data);
+      allow create: if signedIn() && request.resource.data.ownerUid == request.auth.uid;
+      allow update, delete: if signedIn() && resource.data.ownerUid == request.auth.uid;
+    }
+    match /compatibilityReports/{id} {
+      allow read: if canRead(resource.data);
+      allow create: if signedIn() && request.resource.data.ownerUid == request.auth.uid;
+      allow update, delete: if signedIn() && resource.data.ownerUid == request.auth.uid;
+    }
+
+    // ---- inspections ----
+    // Clients may never set or write status "complete". Only finalizeReport (Admin SDK) does.
+    // Once complete, an inspection and everything under it is locked.
+    match /inspections/{inspectionId} {
+      allow read: if canRead(resource.data);
+      allow create: if signedIn()
+        && request.resource.data.ownerUid == request.auth.uid
+        && request.resource.data.status != 'complete'
+        && !request.resource.data.keys().hasAny(['aiSummary', 'signOff', 'signedOffAt', 'reportId', 'verdict']);
+      allow update: if signedIn()
+        && resource.data.ownerUid == request.auth.uid
+        && resource.data.status != 'complete'
+        && request.resource.data.status != 'complete'
+        && ownerUnchanged()
+        && serverFieldsUnchanged();
+      allow delete: if signedIn()
+        && resource.data.ownerUid == request.auth.uid
+        && resource.data.status != 'complete';
+
+      function parent() {
+        return get(/databases/$(database)/documents/inspections/$(inspectionId)).data;
+      }
+      // Writes check the parent as it will be after the request, so a batch can create an
+      // inspection and its first section together. The parent's own rules still apply to it.
+      function parentAfter() {
+        return getAfter(/databases/$(database)/documents/inspections/$(inspectionId)).data;
+      }
+      function canWriteChild() {
+        return signedIn()
+          && parentAfter().status != 'complete'
+          && (parentAfter().ownerUid == request.auth.uid || isOrgMember(parentAfter().get('orgId', null)));
+      }
+
+      match /{sub}/{docId} {
+        allow read: if signedIn()
+          && sub in ['sections', 'evidence', 'findings']
+          && canRead(parent());
+        allow write: if sub in ['sections', 'evidence', 'findings'] && canWriteChild();
+      }
+    }
+
+    // Default deny.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

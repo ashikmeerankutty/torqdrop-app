@@ -1,0 +1,15 @@
+[
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.torqdrop.connect",
+      "sha256_cert_fingerprints": [
+        "52:89:D2:64:DF:C6:95:4E:93:E6:BD:48:D3:40:59:D5:D3:9A:BB:01:AC:89:8E:A9:A9:9D:97:CE:67:14:B7:F4",
+        "EC:82:E2:92:8B:04:D3:DD:C0:B2:3B:01:B9:98:89:14:E7:22:D3:6F:56:C2:3C:5B:23:DD:68:48:12:66:7F:23"
+      ]
+    }
+  }
+]
