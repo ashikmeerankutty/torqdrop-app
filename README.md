@@ -4,6 +4,34 @@
 
 TorqDrop is an Android app for used-car inspection and everyday car diagnostics. It combines a guided inspection checklist, live OBD-II data over Bluetooth, and AI that looks at photos and listens to the engine. Every AI result is a suggestion with its evidence attached; safety warnings come from fixed rules, never from AI.
 
+## Screenshots
+
+**AI engine sound check:** a guided 20-second clip, matched to live rpm from the car.
+
+| Home | Recording, guided | AI verdict |
+| :---: | :---: | :---: |
+| <img src="docs/screenshots/home.jpg" width="240" alt="Home screen with live car status and the engine sound check"> | <img src="docs/screenshots/engine-record.jpg" width="240" alt="Recording the engine with the 'one gentle rev' prompt and live rpm"> | <img src="docs/screenshots/engine-verdict.jpg" width="240" alt="Engine sound check result with verdict and rpm timeline"> |
+
+**Used-car inspection:** a guided checklist, with AI reviewing every photo.
+
+| Checklist with photos | AI photo review | Review and sign off |
+| :---: | :---: | :---: |
+| <img src="docs/screenshots/inspection-checklist.jpg" width="240" alt="Engine section of the inspection checklist with photos"> | <img src="docs/screenshots/inspection-ai-review.jpg" width="240" alt="AI suggestions on inspection photos with confirm and dismiss"> | <img src="docs/screenshots/inspection-signoff.jpg" width="240" alt="Review screen listing what's left before sign-off"> |
+
+**Live diagnostics:** real data from a car over a Bluetooth OBD-II adapter.
+
+| Live data | AI insights | Health check |
+| :---: | :---: | :---: |
+| <img src="docs/screenshots/live-data.jpg" width="240" alt="Live engine data and trouble codes"> | <img src="docs/screenshots/ai-insights.jpg" width="240" alt="AI insights on live data, with confidence and evidence"> | <img src="docs/screenshots/health-check.jpg" width="240" alt="Health score with readiness monitors"> |
+
+| Drive dashboard | All sensors |
+| :---: | :---: |
+| <img src="docs/screenshots/drive.jpg" width="240" alt="Drive tab with gauges and tools"> | <img src="docs/screenshots/all-sensors.jpg" width="240" alt="Every standard reading the car reports"> |
+
+<img src="docs/screenshots/car-mode.jpg" width="720" alt="Landscape car mode with large speed and rpm gauges">
+
+*Car mode: big landscape gauges, with a mirrored HUD view for the windscreen.*
+
 ## Features
 
 **Engine sound check.** Record a 20-second guided video of the engine: idle, one gentle rev, back to idle. A multimodal model listens for knocks, ticks, squeals, whines and misfires, and watches for smoke and leaks. When an OBD adapter is connected, the app records rpm, load, throttle and fuel trims alongside the clip, so each sound is matched to what the engine was doing. Results show on a timeline over the rpm trace. The clip is deleted from the server right after analysis.
@@ -52,17 +80,93 @@ All AI runs on [Meta's Model API](https://dev.meta.ai/) (`https://api.meta.ai/v1
 - Each user has daily limits (for example 10 engine checks and 20 code explanations a day), and every call's tokens and cost are logged to an `aiUsage` collection.
 - Bad replies are retried once, then shown as "AI unavailable" with the rule-based safety advice still in place.
 
-## How it works
+## Architecture
 
+```mermaid
+flowchart LR
+  subgraph Car
+    ECU["Engine computer<br/>(OBD-II)"]
+    ADP["Bluetooth LE<br/>ELM327 adapter"]
+    ECU --- ADP
+  end
+
+  subgraph Phone["TorqDrop app (Expo / React Native)"]
+    OBD["OBD stack<br/>transport → ELM327 → PID / DTC decoders"]
+    RULES["Safety rules<br/>(deterministic)"]
+    UI["Screens<br/>Home · Drive · Garage · Inspection · Engine check"]
+    SQL[("SQLite<br/>garage, trips, engine checks")]
+    QUEUE["Photo upload queue<br/>(works offline)"]
+    OBD --> RULES --> UI
+    OBD --> UI
+    UI <--> SQL
+    UI --> QUEUE
+  end
+
+  subgraph Firebase["Firebase (asia-south1)"]
+    AUTH["Auth + App Check"]
+    FS[("Firestore<br/>inspections, findings, reports")]
+    ST[("Cloud Storage<br/>photos, engine clips")]
+    CF["Cloud Functions<br/>validation · quotas · usage log"]
+  end
+
+  META["Meta Model API<br/>Muse Spark 1.2 / 1.3"]
+
+  ADP <-->|BLE| OBD
+  UI --> AUTH
+  QUEUE --> ST
+  UI <--> FS
+  UI -->|callable| CF
+  CF <--> FS
+  CF <--> ST
+  CF <-->|"video, images, text<br/>→ structured JSON"| META
 ```
-Expo / React Native app ──► Firebase Auth + App Check
-  ├─ OBD stack (BLE → ELM327 → PID/DTC decoders)          ──► local SQLite (trips, garage, engine checks)
-  ├─ Inspection checklist + photo upload queue            ──► Firestore + Cloud Storage (offline-first)
-  └─ AI features ─► Cloud Functions (asia-south1) ─► Meta Model API (muse-spark)
-                     · Zod-validated structured output
-                     · deterministic safety floor applied after the model
-                     · per-user daily quotas, usage and cost logged
+
+**Engine sound check, end to end:**
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant U as Owner
+  participant A as App
+  participant C as Car (OBD)
+  participant S as Cloud Storage
+  participant F as Cloud Function
+  participant M as Muse Spark 1.2
+
+  U->>A: Record the engine (20 s, guided)
+  loop every second while recording
+    A->>C: rpm, load, throttle, fuel trims
+    C-->>A: readings
+  end
+  A->>S: Upload clip (engine-clips/uid/id.mp4)
+  A->>F: analyzeEngineClip(id, car, concerns, OBD trace)
+  F->>F: Sign-in, App Check, daily quota
+  F->>S: Download clip, check it's a real MP4
+  F->>M: Video + audio + OBD trace + context
+  M-->>F: Sounds with timestamps, idle rhythm, what it saw, next steps (JSON)
+  F->>F: Validate with Zod, apply the safety floor
+  F->>S: Delete the clip
+  F-->>A: Result + safety banners
+  A->>A: Save on the phone, draw the rpm timeline
 ```
+
+**Design choices:**
+- **Offline first.** OBD runs entirely on the phone, so live data, trouble codes, trips and the garage work with no network. Inspections use Firestore's offline cache, and photos wait in a local queue until there's a signal.
+- **AI only on the server.** The app never holds the Meta API key. Every AI call goes through a Cloud Function that checks sign-in and App Check, applies a per-user daily quota, and logs tokens and cost.
+- **Rules before AI.** Deterministic rules (`lib/diagnostics/safety-rules.ts`) produce the safety warnings. Model output is validated against shared Zod schemas (`lib/schemas/`), and the model can only raise urgency.
+- **One OBD stack, any transport.** The same session and decoders run over Bluetooth, over a simulated car for demos, and over scripted adapter replies in the unit tests.
+- **Minimal data kept.** Engine clips are deleted after analysis. Engine check results, trips and the garage stay on the phone; inspections, reports and the account live in the cloud.
+
+| Layer | What's there |
+| --- | --- |
+| OBD | `lib/obd/`: BLE and mock transports, ELM327 session, PID and DTC decoding, live polling, trip recorder, health score, battery and performance tests |
+| Diagnostics | `lib/diagnostics/`: safety rules, trouble-code database, evidence engine, inspection checklists |
+| Local data | `lib/db/`: SQLite with migrations (vehicles, trips, maintenance, reminders, engine checks) |
+| Cloud | `lib/firebase/`: auth, App Check, inspections, upload queue, AI calls |
+| Functions | `functions/src/`: `analyzeEngineClip`, `analyzePhotoEvidence`, `analyzeSectionPhotos`, `scanDocument`, `analyzeLiveSnapshot`, `explainDtc`, `analyzeSession`, `finalizeReport`, `createReportLink`, `reportPage`, `verifyPurchase`, `deleteAccount` |
+| Security | `firestore.rules`, `storage.rules`: owner-only access; only the server can write credits, payments, reports, share links and AI usage |
+
+### Tech stack
 
 - **App:** Expo SDK 58, React Native 0.88, Expo Router, TypeScript, `react-native-ble-plx`, `expo-camera`, `expo-sqlite`.
 - **Backend:** Firebase (Auth, Firestore, Storage, Cloud Functions 2nd gen, App Check, Hosting).
