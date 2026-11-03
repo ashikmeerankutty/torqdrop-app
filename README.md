@@ -14,6 +14,44 @@ TorqDrop is an Android app for used-car inspection and everyday car diagnostics.
 
 **No adapter?** A built-in simulated car runs every OBD feature with clearly labelled demo data.
 
+## How AI helps
+
+Most people can't judge a car's condition. A buyer doesn't know a repainted panel when they see one, and an owner hears a new noise but can't say whether it's a loose heat shield or a failing bearing. Mechanics can, but they aren't standing next to you when you need them. TorqDrop uses AI to give that first expert opinion: what it sees or hears, how serious it might be, and what to check next.
+
+| Where | What the AI does for the user |
+| --- | --- |
+| **Engine sound check** | Watches and listens to a 20-second engine video. Names the sounds it hears (knock, tick, squeal, whine, misfire, exhaust leak…) with the time each one happens, judges whether the idle is steady, notes smoke or leaks it can see, and explains what each finding usually means. With OBD data recorded alongside, it can tell a sound that rises with rpm (engine) from one that doesn't (accessory or body). |
+| **Inspection photos** | Reviews each photo against the checklist item it was taken for: paint shade mismatch, uneven panel gaps, dents, rust, oil leaks, worn tyres, flood marks. |
+| **Documents** | Reads the RC and insurance papers and fills in registration, owner count, fuel, validity dates and more, so the inspector checks rather than types. |
+| **Live engine data** | Looks at a snapshot of live OBD readings and points out what's unusual, such as lean fuel trims or a slow-warming engine, in plain language. |
+| **Trouble codes and symptoms** | Explains warning codes and symptoms the owner describes: likely causes, how urgent it is, and what to ask a mechanic. |
+| **Inspection summary** | Turns a finished inspection into an overview a buyer can read, with the issues that matter most first. |
+
+### Built so AI can't mislead
+
+A wrong answer about a car can cost money or be unsafe, so the AI is boxed in:
+
+- **Safety warnings never depend on AI.** Rules in `lib/diagnostics/safety-rules.ts` decide when to say "stop driving" (overheating, a flashing misfire light, low oil pressure…). The model can raise the urgency, but never lower it below what the rules say.
+- **Evidence first.** Every finding is tied to the photo, sound time or reading behind it. The inspector confirms or dismisses each photo suggestion, and nothing goes in a report unconfirmed.
+- **Honest about uncertainty.** Each finding has a confidence level. A noisy or badly framed clip gets "couldn't hear clearly, record again", not a guess. The app never says a car is safe or defect-free.
+- **Validated output.** Replies must match a strict JSON schema, then pass Zod validation in `lib/schemas/`. Anything that doesn't parse, refers to a reading that wasn't sent, or claims a time outside the clip is dropped.
+
+## How we use the Meta Model API
+
+All AI runs on [Meta's Model API](https://dev.meta.ai/) (`https://api.meta.ai/v1`, OpenAI-compatible), through one small client in `functions/src/shared/meta-client.ts`.
+
+- **Muse Spark 1.3** (`muse-spark-1.3`) handles images and text: inspection photos, RC and insurance documents, live OBD snapshots, trouble codes and inspection summaries. Images go in as `image_url` parts, and replies use native `json_schema` structured output.
+- **Muse Spark 1.2** (`muse-spark-1.2`) handles the engine sound check, because it takes video **with its audio track** in a single request (`video_url`, sampled at 2 frames a second). We picked 1.2 over 1.3 here because Meta's docs note 1.3's audio understanding is reduced. The clip goes in together with the car's details, the owner's concerns and the per-second OBD trace, so the model can reason about sound, picture and engine data at once.
+
+**Why it matters.** The engine sound check only works because one model can see, hear and read numbers together. Without it, we'd need a separate audio classifier, an image model and our own logic to fuse them, and still couldn't explain the result in plain language. Muse Spark's multimodal input and structured output let a small team ship a mechanic-style "listen to it" check in a phone app. Vision and document reading do the same for the inspection: hours of typing and second-guessing become a quick confirm-or-dismiss.
+
+**How it's run safely and cheaply:**
+- The API key stays on the server (Firebase Secret Manager). The app never calls Meta directly; it goes through Cloud Functions that require sign-in and App Check.
+- Free text from users is stripped of phone numbers, email addresses and registration numbers before it's sent.
+- Engine clips are uploaded to Cloud Storage, sent once, and deleted straight after analysis.
+- Each user has daily limits (for example 10 engine checks and 20 code explanations a day), and every call's tokens and cost are logged to an `aiUsage` collection.
+- Bad replies are retried once, then shown as "AI unavailable" with the rule-based safety advice still in place.
+
 ## How it works
 
 ```
